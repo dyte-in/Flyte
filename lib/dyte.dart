@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
-
 import 'package:dyte_core/dyte_core.dart';
+import 'package:flutter/material.dart';
 import 'package:flyte/api.dart';
 
 List<DyteJoinedMeetingParticipant> dyteParticipants = [];
@@ -9,16 +8,24 @@ String? dyteMeetingId;
 
 bool isDyteInit = false;
 
+enum DyteRoomState {
+  joining,
+  joined,
+  leaving,
+  left,
+}
+
 mixin DyteDelegate {
-  void update(
-      String state, DyteJoinedMeetingParticipant participant, bool isLocal);
+  void update(DyteJoinedMeetingParticipant participant, bool isLocal);
+
+  void roomState(DyteRoomState roomState);
 }
 
 class Dyte
     implements DyteMeetingRoomEventsListener, DyteParticipantEventsListener {
-  late DyteDelegate? dyteDelegate;
+  final List<DyteDelegate> _delegates = [];
 
-  static final Dyte dyte = Dyte._internal(dyteDelegate: null);
+  static final Dyte dyte = Dyte._internal();
 
   final dyteClient = DyteMobileClient();
 
@@ -26,7 +33,15 @@ class Dyte
     return dyte;
   }
 
-  Dyte._internal({required this.dyteDelegate}) {
+  void addDelegate(DyteDelegate delegate) {
+    _delegates.add(delegate);
+  }
+
+  void removeDelegate(DyteDelegate delegate) {
+    _delegates.remove(delegate);
+  }
+
+  Dyte._internal() {
     debugPrint('INIT DYTE SINGLETON');
 
     if (!isDyteInit) {
@@ -63,14 +78,19 @@ class Dyte
     debugPrint('dyteLeaveRoom');
 
     dyteClient.leaveRoom();
-    dyteDelegate?.update('leave', dyteClient.localUser, true);
+    for (final delegate in _delegates) {
+      delegate.roomState(DyteRoomState.leaving);
+      delegate.update(dyteClient.localUser, true);
+    }
   }
 
   // DyteMeetingRoomEventsListener
   @override
   void onMeetingInitStarted() {
     debugPrint('onMeetingInitStarted');
-
+    for (final delegate in _delegates) {
+      delegate.roomState(DyteRoomState.joining);
+    }
     dyteParticipants.clear();
   }
 
@@ -78,6 +98,10 @@ class Dyte
   Future<void> onMeetingInitCompleted() async {
     debugPrint('onMeetingInitCompleted');
     dyteJoinRoom();
+
+    for (final delegate in _delegates) {
+      delegate.roomState(DyteRoomState.leaving);
+    }
   }
 
   @override
@@ -114,7 +138,10 @@ class Dyte
   void onMeetingRoomJoinCompleted() {
     debugPrint('onMeetingRoomJoinCompleted');
 
-    dyteDelegate?.update('join', dyteClient.localUser, true);
+    for (final delegate in _delegates) {
+      delegate.update(dyteClient.localUser, true);
+      delegate.roomState(DyteRoomState.joined);
+    }
   }
 
   @override
@@ -125,6 +152,10 @@ class Dyte
   @override
   void onMeetingRoomJoinStarted() {
     debugPrint('onMeetingRoomJoinStarted');
+
+    for (final delegate in _delegates) {
+      delegate.roomState(DyteRoomState.joining);
+    }
   }
 
   @override
@@ -171,7 +202,7 @@ class Dyte
 
   @override
   void onNoActiveSpeaker() {
-    debugPrint('onReconnectingToMeetingRoom');
+    debugPrint('onNoActiveSpeaker');
   }
 
   @override
@@ -230,6 +261,8 @@ class Dyte
       bool videoEnabled, DyteJoinedMeetingParticipant participant) {
     debugPrint('onVideoUpdate');
 
-    dyteDelegate?.update('join', participant, false);
+    for (final delegate in _delegates) {
+      delegate.update(participant, false);
+    }
   }
 }
